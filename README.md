@@ -1,3 +1,7 @@
 # Description
 
-Showcase of different rate limiter implementations. All methods are implemented as middleware on the server-side for a simple API made with FastAPI for the purpose of this showcase. All components are deployed on a k8s cluster.
+Showcase of different rate limiter implementations. All methods are implemented as middleware on the server-side for a simple API made with FastAPI for the purpose of this showcase. The project is meant to be deployed in a k8s cluster, but I will also add instructions to run locally.
+
+# Run locally
+
+### Set up prometheus
