@@ -1,3 +1,4 @@
+import time
 from abc import ABC, abstractmethod
 from datetime import datetime as dt
 from typing import Callable, Dict
@@ -26,31 +27,36 @@ class LeakingBucket(RateLimiter):
 
 
 class TokenBucketRateLimiter(RateLimiter):
-    def __init__(self, max_tokens: int = 4, flow_rate: int = 2) -> None:
+    def __init__(
+        self, redis_client, max_tokens: int = 4, refill_rate: float = 2
+    ) -> None:
+        self.redis_client = redis_client
         self.max_tokens = max_tokens
-        self.flow_rate = flow_rate
-        self.buckets = {}
+        self.refill_rate = refill_rate
+        # self.buckets = {}
 
-    def receive_request(self, request: Request) -> bool:
+    async def receive_request(self, request: Request) -> bool:
         ip = request.client.host
-        current_time = dt.now()
-        if ip not in self.buckets:
-            self.buckets[ip] = {
-                "tokens": self.max_tokens - 1,
-                "last_request": current_time,
-            }
-            return True
-        current_bucket = self.buckets[ip]
-        time_elapsed = (
-            current_time - current_bucket["last_request"]
-        ).total_seconds()
-        current_bucket["last_request"] = current_time
-        current_bucket["tokens"] = min(
-            self.max_tokens,
-            current_bucket["tokens"] + time_elapsed * self.flow_rate,
-        )
-        if current_bucket["tokens"] >= 1:
-            current_bucket["tokens"] -= 1
+        current_time = time.time()
+
+        tokens = self.redis_client.hget(ip, "tokens")
+        last_update = self.redis_client.hget(ip, "last_update")
+
+        if tokens is None:
+            tokens = self.max_tokens
+            last_update = current_time
+        else:
+            tokens = float(tokens)
+            last_update = float(last_update)
+            elapsed_time = current_time - last_update
+            refill_tokens = elapsed_time * self.refill_rate
+            tokens = min(self.max_tokens, tokens + refill_tokens)
+            last_update = current_time
+
+        if tokens >= 0:
+            self.redis_client.hset(
+                ip, mapping={"tokens": tokens - 1, "last_update": last_update}
+            )
             return True
         else:
             return False
@@ -67,7 +73,7 @@ class TokenBucketMiddleware(BaseHTTPMiddleware):
         if request.url.path == "/metrics":
             response = await call_next(request)
             return response
-        if self.rate_limiter.receive_request(request):
+        if await self.rate_limiter.receive_request(request):
             response = await call_next(request)
             return response
         else:
