@@ -33,7 +33,6 @@ class TokenBucketRateLimiter(RateLimiter):
         self.redis_client = redis_client
         self.max_tokens = max_tokens
         self.refill_rate = refill_rate
-        # self.buckets = {}
 
     async def receive_request(self, request: Request) -> bool:
         ip = request.client.host
