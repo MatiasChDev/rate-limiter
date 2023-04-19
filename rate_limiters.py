@@ -1,3 +1,4 @@
+import asyncio
 import time
 from abc import ABC, abstractmethod
 from datetime import datetime as dt
@@ -5,6 +6,7 @@ from typing import Callable, Dict
 
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import JSONResponse
 
 
 class RateLimiter(ABC):
@@ -13,17 +15,55 @@ class RateLimiter(ABC):
         pass
 
 
-class LeakingBucket(RateLimiter):
-    def __init__(self, max_size: int = 4) -> None:
-        self.buckets = {}
+class LeakingBucketRateLimiter(RateLimiter):
+    processing_queue = {}
 
-    def receive_request(self, request: Request) -> bool:
+    def __init__(self, max_size: int = 4, processing_rate: float = 1) -> None:
+        self.max_size = max_size
+        self.processing_rate = processing_rate
+
+    async def receive_request(self, request: Request) -> bool:
         ip = request.client.host
-        if ip not in self.buckets:
-            self.buckets[ip] = []
-        current_bucket = self.buckets[ip]
-        if len(current_bucket) > self.max_size:
+        if ip not in self.processing_queue:
+            self.processing_queue[ip] = asyncio.Queue(maxsize=self.max_size)
+        try:
+            self.processing_queue[ip].put_nowait(dt.now())
+            return True
+        except asyncio.QueueFull:
             return False
+
+    async def process_queue(self):
+        while True:
+            if len(self.processing_queue.keys()) > 0:
+                for ip in self.processing_queue.keys():
+                    if not self.processing_queue[ip].empty():
+                        data = self.processing_queue[ip].get_nowait()
+                        print(data)
+                for k, v in list(self.processing_queue.items()):
+                    if v.empty():
+                        del self.processing_queue[k]
+            await asyncio.sleep(1 / self.processing_rate)
+
+
+class LeakingBucketMiddleware(BaseHTTPMiddleware):
+    def __init__(
+        self, app: Callable, rate_limiter: LeakingBucketRateLimiter
+    ) -> None:
+        super().__init__(app)
+        self.rate_limiter = rate_limiter
+
+    async def dispatch(self, request: Request, call_next):
+        if request.url.path == "/metrics":
+            response = await call_next(request)
+            return response
+        if await self.rate_limiter.receive_request(request):
+            response = await call_next(request)
+            return response
+        else:
+            print("Over limit")
+            return JSONResponse(
+                content={"message": "Over limit"}, status_code=429
+            )
 
 
 class TokenBucketRateLimiter(RateLimiter):
@@ -77,3 +117,6 @@ class TokenBucketMiddleware(BaseHTTPMiddleware):
             return response
         else:
             print("Over limit")
+            return JSONResponse(
+                content={"message": "Over limit"}, status_code=429
+            )
