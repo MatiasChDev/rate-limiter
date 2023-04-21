@@ -22,12 +22,12 @@ class LeakingBucketRateLimiter(RateLimiter):
         self.max_size = max_size
         self.processing_rate = processing_rate
 
-    async def receive_request(self, request: Request) -> bool:
-        ip = request.client.host
+    async def receive_request(self, data: Dict) -> bool:
+        ip = data["request"].client.host
         if ip not in self.processing_queue:
             self.processing_queue[ip] = asyncio.Queue(maxsize=self.max_size)
         try:
-            self.processing_queue[ip].put_nowait(dt.now())
+            self.processing_queue[ip].put_nowait(data)
             return True
         except asyncio.QueueFull:
             return False
@@ -38,6 +38,8 @@ class LeakingBucketRateLimiter(RateLimiter):
                 for ip in self.processing_queue.keys():
                     if not self.processing_queue[ip].empty():
                         data = self.processing_queue[ip].get_nowait()
+                        result = await data["call_next"](data["request"])
+                        data["event"].set_result(result)
                         print(data)
                 for k, v in list(self.processing_queue.items()):
                     if v.empty():
@@ -56,8 +58,11 @@ class LeakingBucketMiddleware(BaseHTTPMiddleware):
         if request.url.path == "/metrics":
             response = await call_next(request)
             return response
-        if await self.rate_limiter.receive_request(request):
-            response = await call_next(request)
+        event = asyncio.get_event_loop().create_future()
+        if await self.rate_limiter.receive_request(
+            {"request": request, "event": event, "call_next": call_next}
+        ):
+            response = await event
             return response
         else:
             print("Over limit")
