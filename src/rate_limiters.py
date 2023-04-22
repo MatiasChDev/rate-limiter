@@ -1,7 +1,6 @@
 import asyncio
 import time
 from abc import ABC, abstractmethod
-from datetime import datetime as dt
 from typing import Callable, Dict
 
 from fastapi import Request
@@ -13,6 +12,12 @@ class RateLimiter(ABC):
     @abstractmethod
     def receive_request(self, request: Request) -> bool:
         pass
+
+
+class FixedWindowRateLimiter(RateLimiter):
+    def __init__(self, max_requests: int = 4, interval: float = 60) -> None:
+        self.max_requests = max_requests
+        self.interval = interval
 
 
 class LeakingBucketRateLimiter(RateLimiter):
@@ -47,9 +52,7 @@ class LeakingBucketRateLimiter(RateLimiter):
 
 
 class LeakingBucketMiddleware(BaseHTTPMiddleware):
-    def __init__(
-        self, app: Callable, rate_limiter: LeakingBucketRateLimiter
-    ) -> None:
+    def __init__(self, app: Callable, rate_limiter: LeakingBucketRateLimiter) -> None:
         super().__init__(app)
         self.rate_limiter = rate_limiter
 
@@ -65,9 +68,7 @@ class LeakingBucketMiddleware(BaseHTTPMiddleware):
             return response
         else:
             print("Over limit")
-            return JSONResponse(
-                content={"message": "Over limit"}, status_code=429
-            )
+            return JSONResponse(content={"message": "Over limit"}, status_code=429)
 
 
 class TokenBucketRateLimiter(RateLimiter):
@@ -106,9 +107,7 @@ class TokenBucketRateLimiter(RateLimiter):
 
 
 class TokenBucketMiddleware(BaseHTTPMiddleware):
-    def __init__(
-        self, app: Callable, rate_limiter: TokenBucketRateLimiter
-    ) -> None:
+    def __init__(self, app: Callable, rate_limiter: TokenBucketRateLimiter) -> None:
         super().__init__(app)
         self.rate_limiter = rate_limiter
 
@@ -121,6 +120,4 @@ class TokenBucketMiddleware(BaseHTTPMiddleware):
             return response
         else:
             print("Over limit")
-            return JSONResponse(
-                content={"message": "Over limit"}, status_code=429
-            )
+            return JSONResponse(content={"message": "Over limit"}, status_code=429)
