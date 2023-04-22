@@ -1,11 +1,10 @@
 import asyncio
-import time
 
 import redis
 from fastapi import FastAPI, Request
 from prometheus_fastapi_instrumentator import Instrumentator
 
-from rate_limiters import (
+from src.rate_limiters import (
     LeakingBucketMiddleware,
     LeakingBucketRateLimiter,
     TokenBucketMiddleware,

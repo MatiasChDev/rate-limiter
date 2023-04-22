@@ -40,7 +40,6 @@ class LeakingBucketRateLimiter(RateLimiter):
                         data = self.processing_queue[ip].get_nowait()
                         result = await data["call_next"](data["request"])
                         data["event"].set_result(result)
-                        print(data)
                 for k, v in list(self.processing_queue.items()):
                     if v.empty():
                         del self.processing_queue[k]

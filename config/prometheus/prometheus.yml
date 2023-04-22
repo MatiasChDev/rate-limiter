@@ -7,4 +7,4 @@ scrape_configs:
       - targets: ["localhost:9090"]
   - job_name: fastapi
     static_configs:
-      - targets: ['192.168.1.75:8000']
+      - targets: ['fastapi:8000']
