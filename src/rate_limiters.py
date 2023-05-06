@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from typing import Callable, Dict
 
 from fastapi import Request
+from redis import Redis
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
@@ -15,12 +16,48 @@ class RateLimiter(ABC):
 
 
 class FixedWindowRateLimiter(RateLimiter):
-    def __init__(self, max_requests: int = 4, interval: float = 60) -> None:
+    def __init__(
+        self, redis_client: Redis, max_requests: int = 4, interval: float = 10
+    ) -> None:
+        self.redis_client = redis_client
         self.max_requests = max_requests
         self.interval = interval
 
+    async def receive_request(self, request: Request) -> bool:
+        self.redis_client.set(
+            request.client.host, self.max_requests, nx=True, ex=self.interval
+        )
+        self.redis_client.decr(request.client.host)
+        count = int(self.redis_client.get(request.client.host))
+        print(count)
+        if count > 0:
+            return True
+        else:
+            return False
 
-class LeakingBucketRateLimiter(RateLimiter):
+
+class FixedWindowMiddleware(BaseHTTPMiddleware):
+    def __init__(
+        self, app: Callable, rate_limiter: FixedWindowRateLimiter
+    ) -> None:
+        super().__init__(app)
+        self.rate_limiter = rate_limiter
+
+    async def dispatch(self, request: Request, call_next):
+        if request.url.path == "/metrics":
+            response = await call_next(request)
+            return response
+        if await self.rate_limiter.receive_request(request):
+            response = await call_next(request)
+            return response
+        else:
+            print("Over limit")
+            return JSONResponse(
+                content={"message": "Over limit"}, status_code=429
+            )
+
+
+class LeakingBucketRateLimiterAsyncio(RateLimiter):
     processing_queue = {}
 
     def __init__(self, max_size: int = 4, processing_rate: float = 1) -> None:
@@ -51,8 +88,10 @@ class LeakingBucketRateLimiter(RateLimiter):
             await asyncio.sleep(1 / self.processing_rate)
 
 
-class LeakingBucketMiddleware(BaseHTTPMiddleware):
-    def __init__(self, app: Callable, rate_limiter: LeakingBucketRateLimiter) -> None:
+class LeakingBucketMiddlewareAsyncio(BaseHTTPMiddleware):
+    def __init__(
+        self, app: Callable, rate_limiter: LeakingBucketRateLimiterAsyncio
+    ) -> None:
         super().__init__(app)
         self.rate_limiter = rate_limiter
 
@@ -68,7 +107,9 @@ class LeakingBucketMiddleware(BaseHTTPMiddleware):
             return response
         else:
             print("Over limit")
-            return JSONResponse(content={"message": "Over limit"}, status_code=429)
+            return JSONResponse(
+                content={"message": "Over limit"}, status_code=429
+            )
 
 
 class TokenBucketRateLimiter(RateLimiter):
@@ -107,7 +148,9 @@ class TokenBucketRateLimiter(RateLimiter):
 
 
 class TokenBucketMiddleware(BaseHTTPMiddleware):
-    def __init__(self, app: Callable, rate_limiter: TokenBucketRateLimiter) -> None:
+    def __init__(
+        self, app: Callable, rate_limiter: TokenBucketRateLimiter
+    ) -> None:
         super().__init__(app)
         self.rate_limiter = rate_limiter
 
@@ -120,4 +163,6 @@ class TokenBucketMiddleware(BaseHTTPMiddleware):
             return response
         else:
             print("Over limit")
-            return JSONResponse(content={"message": "Over limit"}, status_code=429)
+            return JSONResponse(
+                content={"message": "Over limit"}, status_code=429
+            )
