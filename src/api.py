@@ -4,7 +4,6 @@ import os
 
 import redis
 from fastapi import FastAPI
-from prometheus_fastapi_instrumentator import Instrumentator
 
 from src import rate_limiters
 
@@ -14,10 +13,6 @@ rate_limiters_list = {
     "TokenBucket": (
         rate_limiters.TokenBucketRateLimiter,
         rate_limiters.TokenBucketMiddleware,
-    ),
-    "LeakingBucket": (
-        rate_limiters.LeakingBucketRateLimiter,
-        rate_limiters.LeakingBucketMiddleware,
     ),
     "FixedWindow": (
         rate_limiters.FixedWindowRateLimiter,
@@ -33,16 +28,14 @@ rate_limiters_list = {
     ),
 }
 
+redis_client = redis.Redis(host="localhost", port=6379, decode_responses=True)
 
-def create_app():
+
+def create_app(rate_limiter_type, *args):
     app = FastAPI()
-    redis_client = redis.Redis(host="localhost", port=6379, decode_responses=True)
     redis_client.flushall()
-    rate_limiter_type = os.environ["RATE_LIMITER"]
     rate_limiter_func = rate_limiters_list[rate_limiter_type][0]
-    args = os.environ["RATE_LIMITER_ARGS"]
-    split_args = [float(arg) for arg in args.split()]
-    rate_limiter = rate_limiter_func(redis_client, *split_args)
+    rate_limiter = rate_limiter_func(redis_client, *args)
     middleware = rate_limiters_list[rate_limiter_type][1]
     app.add_middleware(middleware, rate_limiter=rate_limiter)
 
@@ -59,8 +52,3 @@ def create_app():
         return {f"Hello {name}!"} if name else {"Hello World!"}
 
     return app
-
-
-app = create_app()
-
-Instrumentator(excluded_handlers=["/metrics"]).instrument(app).expose(app)
